@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.venv-*/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# Runtime artefacts
+/var/
+*.log
+
+# Test scratch
+.pytest_cache/
+htmlcov/
+.coverage
+tests/__pycache__/
+tests/__init__.py
+
+# Local secrets — never commit
+*.env
+bot.env
+install.json
+hysteriaui-credentials.txt
+x-ui-hybrid-credentials.txt
+
+# Temporary preview output of landing.py
+/tmp-landing/
