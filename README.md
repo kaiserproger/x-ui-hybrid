@@ -20,10 +20,11 @@ One-shot installer that puts a hardened proxy stack on a single Linux box:
 
 ```
                                           ┌─────────────────────────────┐
-                                          │  3x-ui panel  (random port) │
+                                          │  3x-ui panel  (127.0.0.1)   │
                                           └────────────▲────────────────┘
                                                        │
-client ── HTTPS ─────────► nginx :443/tcp ─┬──── /        decoy lander
+client ── HTTPS ─────────► nginx :443/tcp ─┬──── /          decoy lander
+                                           ├──── /<panel>/   ──► 3x-ui panel (127.0.0.1:random)
                                            ├──── /<secret>/  ──► xray VLESS+XHTTP (unix socket)
                                            └──── /<sub>/     ──► xray sub-server (127.0.0.1:2096)
 client ── QUIC ──────────► xray  :443/udp                        Hysteria2 (native, ALPN h3)
@@ -46,7 +47,7 @@ client ── QUIC ──────────► xray  :443/udp             
 | 443/tcp /\<secret\>/ | nginx → xray VLESS+XHTTP via unix socket             |
 | 443/tcp /\<sub\>/    | nginx → 3x-ui subscription server (127.0.0.1:2096)   |
 | 443/udp   | xray — Hysteria2, ALPN h3, Salamander obfs                       |
-| panel     | 3x-ui admin panel (random port, same cert)                       |
+| 443/tcp /\<panel\>/ | nginx → 3x-ui admin panel (127.0.0.1 random port) |
 | local 8765 | bot's hook server (alert + backup, 127.0.0.1 only)              |
 
 ## Why these components
@@ -151,6 +152,8 @@ Flags:
 | `--email`              | ACME contact (default: `admin@<domain>`)                                       |
 | `--bot-token`          | Telegram bot token; **enables the bot** (otherwise skipped)                    |
 | `--skip-bot`           | don't install the bot even if `--bot-token` is given                           |
+| `--uninstall`          | remove x-ui-hybrid services, configs and generated data                        |
+| `--purge`              | with `--uninstall`, also remove nginx/fail2ban packages and acme.sh            |
 | `-h`, `--help`         | help                                                                           |
 
 Whole run: ~2–4 minutes (apt + LE challenge + xray binary download).
@@ -252,22 +255,11 @@ The hook port (`XUH_HOOK_PORT`, default 8765) only listens on
 ## Uninstall
 
 ```bash
-systemctl disable --now x-ui-hybrid-bot 2>/dev/null
-rm -f /etc/systemd/system/x-ui-hybrid-bot.service
-systemctl daemon-reload
-rm -rf /opt/x-ui-hybrid-bot
+# Removes services, x-ui, configs, generated data, nginx site, webroot and certs.
+sudo bash install.sh --uninstall vpn.example.org
 
-x-ui uninstall                # removes 3x-ui + xray + service file
-systemctl disable --now nginx fail2ban
-apt-get purge -y nginx fail2ban
-~/.acme.sh/acme.sh --uninstall
-
-rm -rf /etc/ssl/<domain> /var/www/<domain> /var/www/_acme
-rm -rf /etc/x-ui-hybrid /var/lib/x-ui-hybrid /var/backups/x-ui-hybrid
-rm -f  /etc/cron.d/x-ui-hybrid /etc/sysctl.d/99-x-ui-hybrid.conf
-rm -f  /etc/fail2ban/jail.d/3x-ui.local /etc/fail2ban/filter.d/3x-ui.conf
-rm -f  /usr/local/sbin/x-ui-hybrid-{healthcheck,backup}
-rm -f  /root/x-ui-hybrid-credentials.txt
+# Full cleanup for a disposable VPS: also purges nginx/fail2ban and removes acme.sh.
+sudo bash install.sh --uninstall vpn.example.org --purge
 ```
 
 ## Files this script touches

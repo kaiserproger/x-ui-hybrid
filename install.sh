@@ -13,6 +13,7 @@
 #
 # Usage:
 #   sudo ./install.sh <domain> [--email me@x] [--bot-token <BOT>] [--admin-tg <user>] [--skip-bot]
+#   sudo ./install.sh --uninstall [domain] [--purge]
 #
 # Tested: Ubuntu 22.04/24.04, Debian 11/12.
 
@@ -29,9 +30,11 @@ die()    { red "ERROR: $*" >&2; exit 1; }
 usage() {
     cat <<USAGE
 Usage: sudo $0 <domain> [options]
+       sudo $0 --uninstall [domain] [--purge]
 
 Required:
   <domain>                 Public domain with an A/AAAA record on this server.
+                           Optional for --uninstall if install.json still exists.
 
 Options:
   --email <addr>           ACME contact email (default: admin@<domain>).
@@ -40,13 +43,84 @@ Options:
                            the flag for multiple admins. The first user with one of
                            these usernames to /start the bot is auto-promoted.
   --skip-bot               Do not install the bot even if --bot-token was given.
+  --uninstall              Remove x-ui-hybrid services, configs and generated data.
+  --purge                  With --uninstall, also purge nginx/fail2ban packages and
+                           remove acme.sh itself. This is intentionally destructive.
   -h, --help               This help.
 
 Examples:
   sudo $0 vpn.example.org --admin-tg myhandle
   sudo $0 vpn.example.org --admin-tg myhandle --email me@example.org
   sudo $0 vpn.example.org --admin-tg me --admin-tg co-admin --bot-token 8000:AAA…
+  sudo $0 --uninstall vpn.example.org --purge
 USAGE
+}
+
+uninstall_stack() {
+    local domain="${1:-}"
+    local purge="${2:-0}"
+    local meta=/etc/x-ui-hybrid/install.json
+
+    if [[ -z "$domain" && -f "$meta" ]] && command -v jq >/dev/null 2>&1; then
+        domain="$(jq -r '.domain // empty' "$meta" 2>/dev/null || true)"
+    fi
+
+    green ">>> Stopping x-ui-hybrid services"
+    systemctl disable --now x-ui-hybrid-bot.service 2>/dev/null || true
+    systemctl disable --now x-ui.service 2>/dev/null || true
+    systemctl stop nginx.service fail2ban.service 2>/dev/null || true
+
+    green ">>> Removing systemd units and installed application files"
+    rm -f /etc/systemd/system/x-ui-hybrid-bot.service
+    rm -f /etc/systemd/system/x-ui.service
+    systemctl daemon-reload
+    systemctl reset-failed x-ui-hybrid-bot.service x-ui.service 2>/dev/null || true
+
+    rm -rf /opt/x-ui-hybrid-bot
+    rm -rf /usr/local/x-ui /etc/x-ui
+    rm -f /usr/bin/x-ui
+
+    green ">>> Removing x-ui-hybrid configs, jobs, backups and logs"
+    rm -rf /etc/x-ui-hybrid /var/lib/x-ui-hybrid /var/backups/x-ui-hybrid /run/x-ui-hybrid
+    rm -f /etc/cron.d/x-ui-hybrid
+    rm -f /etc/sysctl.d/99-x-ui-hybrid.conf /etc/tmpfiles.d/x-ui-hybrid.conf
+    rm -f /etc/fail2ban/jail.d/3x-ui.local /etc/fail2ban/filter.d/3x-ui.conf
+    rm -f /usr/local/sbin/x-ui-hybrid-healthcheck /usr/local/sbin/x-ui-hybrid-backup
+    rm -f /root/x-ui-hybrid-credentials.txt /var/log/x-ui-hybrid-health.log
+
+    green ">>> Removing nginx site, webroot and installed certificates"
+    if [[ -n "$domain" ]]; then
+        rm -f "/etc/nginx/sites-enabled/${domain}.conf" "/etc/nginx/sites-available/${domain}.conf"
+        rm -rf "/var/www/${domain}" "/etc/ssl/${domain}"
+        if [[ -x /root/.acme.sh/acme.sh ]]; then
+            /root/.acme.sh/acme.sh --remove -d "$domain" --ecc >/dev/null 2>&1 || true
+            rm -rf "/root/.acme.sh/${domain}_ecc" "/root/.acme.sh/${domain}"
+        fi
+    else
+        yellow ">>> Domain was not provided and install.json is gone; skipping domain-specific nginx/webroot/cert cleanup."
+    fi
+    rm -rf /var/www/_acme
+
+    if [[ -f /etc/nginx/nginx.conf ]]; then
+        nginx -t >/dev/null 2>&1 && systemctl reload nginx 2>/dev/null || true
+    fi
+    systemctl restart fail2ban 2>/dev/null || true
+    sysctl --system >/dev/null 2>&1 || true
+
+    if [[ "$purge" -eq 1 ]]; then
+        green ">>> Purging nginx/fail2ban packages and acme.sh"
+        systemctl disable --now nginx.service fail2ban.service 2>/dev/null || true
+        if [[ -x /root/.acme.sh/acme.sh ]]; then
+            /root/.acme.sh/acme.sh --uninstall >/dev/null 2>&1 || true
+            rm -rf /root/.acme.sh
+        fi
+        if command -v apt-get >/dev/null 2>&1; then
+            apt-get purge -y nginx fail2ban >/dev/null
+            apt-get autoremove -y >/dev/null
+        fi
+    fi
+
+    green ">>> x-ui-hybrid uninstall complete."
 }
 
 # ---------- args ----------
@@ -55,20 +129,30 @@ EMAIL=""
 BOT_TOKEN=""
 ADMINS=()
 SKIP_BOT=0
+UNINSTALL=0
+PURGE=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --email)        EMAIL="$2"; shift 2 ;;
         --bot-token)    BOT_TOKEN="$2"; shift 2 ;;
         --admin-tg)     ADMINS+=("${2#@}"); shift 2 ;;
         --skip-bot)     SKIP_BOT=1; shift ;;
+        --uninstall)    UNINSTALL=1; shift ;;
+        --purge)        PURGE=1; shift ;;
         -h|--help)      usage; exit 0 ;;
         -*)             die "Unknown flag: $1" ;;
         *)              [[ -z "$DOMAIN" ]] && DOMAIN="$1" || die "Unexpected positional arg: $1"; shift ;;
     esac
 done
+[[ $EUID -ne 0 ]] && die "Run as root."
+
+if [[ $UNINSTALL -eq 1 ]]; then
+    uninstall_stack "$DOMAIN" "$PURGE"
+    exit 0
+fi
+
 [[ -z "$DOMAIN" ]] && { usage; die "domain is required"; }
 [[ ${#ADMINS[@]} -eq 0 ]] && { usage; die "at least one --admin-tg <username> is required"; }
-[[ $EUID -ne 0 ]] && die "Run as root."
 [[ -z "$EMAIL" ]] && EMAIL="admin@${DOMAIN}"
 
 [[ "$DOMAIN" =~ ^([A-Za-z0-9](-*[A-Za-z0-9])*\.)+[A-Za-z]{2,}$ ]] \
@@ -204,8 +288,8 @@ chown root:www-data "$CERT_DIR/privkey.pem"
 
 "$ACME" --upgrade --auto-upgrade >/dev/null 2>&1 || true
 
-# ---------- 7. nginx full TLS config (decoy + XHTTP + subscription) ----------
-green ">>> Switching nginx to TLS (TCP/443) with XHTTP and subscription endpoints"
+# ---------- 7. nginx full TLS config (decoy + panel + XHTTP + subscription) ----------
+green ">>> Switching nginx to TLS (TCP/443) with panel, XHTTP and subscription endpoints"
 
 # Secrets used by xray and the bot. All hex / urlsafe.
 XHTTP_PATH="$(openssl rand -hex 9)"            # path under /
@@ -325,6 +409,21 @@ server {
         proxy_hide_header Server;
     }
 
+    # ---- 3x-ui admin panel: secret prefix proxied to the loopback-only panel ----
+    location /${PANEL_PATH}/ {
+        proxy_pass https://127.0.0.1:${PANEL_PORT};
+        proxy_http_version 1.1;
+        proxy_ssl_verify off;
+        proxy_set_header Host              \$host;
+        proxy_set_header X-Real-IP         \$remote_addr;
+        proxy_set_header X-Forwarded-For   \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade           \$http_upgrade;
+        proxy_set_header Connection        "upgrade";
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+    }
+
     # ---- Decoy landing on / ----
     root  ${WEBROOT};
     index index.html;
@@ -349,9 +448,8 @@ if command -v ufw >/dev/null 2>&1; then
     ufw allow 80/tcp       >/dev/null 2>&1 || true
     ufw allow 443/tcp      >/dev/null 2>&1 || true
     ufw allow 443/udp      >/dev/null 2>&1 || true
-    ufw allow "${PANEL_PORT}"/tcp >/dev/null 2>&1 || true
     ufw --force enable     >/dev/null 2>&1 || true
-    # Subscription server stays bound to 127.0.0.1 — never opened externally.
+    # Panel and subscription server stay bound to 127.0.0.1 — never opened externally.
 fi
 
 # ---------- 9. install 3x-ui ----------
@@ -367,8 +465,9 @@ command -v x-ui >/dev/null 2>&1 || die "3x-ui installation failed (x-ui binary n
 
 # ---------- 10. force panel creds + bind sub server to loopback ----------
 green ">>> Setting panel credentials and binding subscription server to localhost"
+systemctl stop x-ui
 x-ui setting -username "$PANEL_USER" -password "$PANEL_PASS" \
-             -port "$PANEL_PORT" -webBasePath "$PANEL_PATH" >/dev/null
+             -port "$PANEL_PORT" -webBasePath "$PANEL_PATH" -listenIP 127.0.0.1 >/dev/null
 
 x-ui setting -webCert "$CERT_DIR/fullchain.pem" -webCertKey "$CERT_DIR/privkey.pem" >/dev/null 2>&1 || \
 x-ui cert    -webCert "$CERT_DIR/fullchain.pem" -webCertKey "$CERT_DIR/privkey.pem" >/dev/null 2>&1 || true
@@ -377,7 +476,8 @@ x-ui cert    -webCert "$CERT_DIR/fullchain.pem" -webCertKey "$CERT_DIR/privkey.p
 # Make the path match nginx's secret prefix and bind the listener to loopback.
 XUI_DB="/etc/x-ui/x-ui.db"
 [[ -f "$XUI_DB" ]] || die "x-ui database not found at $XUI_DB after install."
-sqlite3 "$XUI_DB" <<SQL
+if ! sqlite3 "$XUI_DB" <<SQL
+PRAGMA busy_timeout=10000;
 INSERT OR REPLACE INTO settings (key, value) VALUES ('subEnable', 'true');
 INSERT OR REPLACE INTO settings (key, value) VALUES ('subPort',   '${SUB_PORT_INTERNAL}');
 INSERT OR REPLACE INTO settings (key, value) VALUES ('subPath',   '/sub/');
@@ -386,13 +486,16 @@ INSERT OR REPLACE INTO settings (key, value) VALUES ('subDomain', '${DOMAIN}');
 INSERT OR REPLACE INTO settings (key, value) VALUES ('subURI',    'https://${DOMAIN}/${SUB_PATH}/');
 INSERT OR REPLACE INTO settings (key, value) VALUES ('subShowInfo','true');
 SQL
+then
+    die "failed to update x-ui subscription settings in $XUI_DB"
+fi
 
 systemctl restart x-ui
 
 # ---------- 11. wait for panel + subscription server ----------
 green ">>> Waiting for x-ui (panel + subscription server)"
 for _ in $(seq 1 30); do
-    curl -ks --max-time 2 "https://127.0.0.1:${PANEL_PORT}/${PANEL_PATH}/" >/dev/null \
+    curl -ks --max-time 2 --resolve "${DOMAIN}:443:127.0.0.1" "https://${DOMAIN}/${PANEL_PATH}/" >/dev/null \
         && curl -s --max-time 2 "http://127.0.0.1:${SUB_PORT_INTERNAL}/sub/__probe__" -o /dev/null \
         && break
     sleep 1
@@ -556,7 +659,7 @@ EOF
 cat > /etc/fail2ban/jail.d/3x-ui.local <<EOF
 [3x-ui]
 enabled  = true
-port     = ${PANEL_PORT}
+port     = 443
 filter   = 3x-ui
 logpath  = /var/log/x-ui/access.log
           /usr/local/x-ui/x-ui.log
@@ -580,7 +683,7 @@ cat > "$INSTALL_META" <<EOF
   "domain":          "${DOMAIN}",
   "server_ip":       "${SERVER_IP:-}",
   "panel": {
-    "url":      "https://${DOMAIN}:${PANEL_PORT}/${PANEL_PATH}/",
+    "url":      "https://${DOMAIN}/${PANEL_PATH}/",
     "host":     "127.0.0.1",
     "port":     ${PANEL_PORT},
     "path":     "/${PANEL_PATH}/",
@@ -637,9 +740,9 @@ errs=()
 curl -fsS --max-time 5 "https://\${DOMAIN}/" -o /dev/null \\
     || errs+=("nginx 443/tcp not serving decoy")
 
-# 2. Panel responds.
-curl -ks --max-time 5 "https://127.0.0.1:\${PORT}\${PATH_}" -o /dev/null \\
-    || errs+=("3x-ui panel not responding on \${PORT}")
+# 2. Panel responds through nginx on TCP/443.
+curl -ks --max-time 5 --resolve "\${DOMAIN}:443:127.0.0.1" "https://\${DOMAIN}\${PATH_}" -o /dev/null \\
+    || errs+=("3x-ui panel not responding through nginx 443")
 
 # 3. Hysteria2 listens on UDP/443.
 ss -ulpn 'sport = :443' 2>/dev/null | grep -q ':443'  \\
@@ -736,7 +839,8 @@ Domain       : ${DOMAIN}
 Cert dir     : ${CERT_DIR}
 
 --- 3x-ui panel ---
-URL          : https://${DOMAIN}:${PANEL_PORT}/${PANEL_PATH}/
+URL          : https://${DOMAIN}/${PANEL_PATH}/
+Internal     : https://127.0.0.1:${PANEL_PORT}/${PANEL_PATH}/
 Username     : ${PANEL_USER}
 Password     : ${PANEL_PASS}
 
