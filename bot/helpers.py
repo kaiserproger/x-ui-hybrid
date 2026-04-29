@@ -17,6 +17,7 @@ from urllib.parse import quote
 
 # Inbound remarks the installer creates. Used to look up inbound IDs at runtime.
 REMARK_HY    = "Hysteria2 QUIC :443"
+REMARK_HY_GAME = "Hysteria2 QUIC :19132 (game UDP)"
 REMARK_XHTTP = "VLESS XHTTP :443 (TLS at nginx, unix socket)"
 
 
@@ -32,11 +33,13 @@ class Meta:
     xhttp_padding_key: str
     cert_fullchain: str
     hy_obfs_password: str = ""
+    hy_game_port: int | None = None
 
     @classmethod
     def load(cls, path: Path) -> "Meta":
         data = json.loads(Path(path).read_text())
         panel = data["panel"]
+        hy_game_port = data.get("hysteria2", {}).get("game_port")
         return cls(
             domain=data["domain"],
             panel_url=f"https://{panel['host']}:{panel['port']}{panel['path']}".rstrip("/"),
@@ -48,6 +51,7 @@ class Meta:
             xhttp_padding_key=data["xhttp"]["padding_key"],
             cert_fullchain=data["cert"]["fullchain"],
             hy_obfs_password=data.get("hysteria2", {}).get("obfs_password", ""),
+            hy_game_port=int(hy_game_port) if hy_game_port else None,
         )
 
 
@@ -67,12 +71,12 @@ def sub_url_for(meta: Meta, sub_id: str | None) -> str:
     return f"{meta.sub_public_url.rstrip('/')}/{sub_id}"
 
 
-def hy_share_link(meta: Meta, auth: str, remark: str = REMARK_HY) -> str:
+def hy_share_link(meta: Meta, auth: str, remark: str = REMARK_HY, port: int = 443) -> str:
     query = f"sni={meta.domain}&alpn=h3"
     if meta.hy_obfs_password:
         obfs_password = quote(meta.hy_obfs_password, safe="")
         query += f"&obfs=salamander&obfs-password={obfs_password}"
-    return f"hysteria2://{auth}@{meta.domain}:443/?{query}#{quote(remark)}"
+    return f"hysteria2://{auth}@{meta.domain}:{port}/?{query}#{quote(remark)}"
 
 
 def xhttp_share_link(meta: Meta, uuid_: str, remark: str = REMARK_XHTTP) -> str:

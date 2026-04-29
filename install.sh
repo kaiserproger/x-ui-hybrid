@@ -489,6 +489,7 @@ XHTTP_PATH="$(openssl rand -hex 9)"            # path under /
 SUB_PATH="$(openssl rand -hex 9)"              # path under /
 XHTTP_PADDING_KEY="$(openssl rand -hex 32)"
 SUB_PORT_INTERNAL=2096                         # 3x-ui default sub server port (loopback only)
+HY_GAME_PORT=19132                             # Minecraft Bedrock-like UDP port for mobile networks.
 
 # Pick a real-looking observability header name to carry XHTTP padding.
 # DPI sees a long random hex value — same as Datadog/Honeycomb/Sentry headers do.
@@ -637,6 +638,7 @@ if command -v ufw >/dev/null 2>&1; then
     ufw allow 80/tcp       >/dev/null 2>&1 || true
     ufw allow 443/tcp      >/dev/null 2>&1 || true
     ufw allow 443/udp      >/dev/null 2>&1 || true
+    ufw allow ${HY_GAME_PORT}/udp >/dev/null 2>&1 || true
     ufw --force enable     >/dev/null 2>&1 || true
     # Panel and subscription server stay bound to 127.0.0.1 — never opened externally.
 fi
@@ -709,7 +711,7 @@ for _ in $(seq 1 30); do
 done
 
 # ---------- 12. login + Hysteria2 inbound ----------
-green ">>> Creating Hysteria2 (UDP/443, native QUIC) inbound"
+green ">>> Creating Hysteria2 inbounds (UDP/443 and UDP/${HY_GAME_PORT}, native QUIC)"
 
 COOKIE_JAR="$(mktemp)"
 trap 'rm -f "$COOKIE_JAR"' EXIT
@@ -727,11 +729,20 @@ echo "$login_resp" | jq -e '.success == true' >/dev/null 2>&1 \
 HY_AUTH="$(openssl rand -hex 16)"
 HY_OBFS_PASSWORD="$(openssl rand -hex 16)"
 HY_EMAIL="default-hy2"
+HY_GAME_EMAIL="default-hy2-${HY_GAME_PORT}"
 HY_SUBID="$(openssl rand -hex 8)"
 HY_REMARK="Hysteria2 QUIC :443"
+HY_GAME_REMARK="Hysteria2 QUIC :${HY_GAME_PORT} (game UDP)"
 
 HY_SETTINGS_JSON="$(jq -nc \
     --arg auth "$HY_AUTH" --arg email "$HY_EMAIL" --arg sub "$HY_SUBID" \
+    '{version: 2, clients: [{
+        auth: $auth, email: $email, limitIp: 0, totalGB: 0, expiryTime: 0,
+        enable: true, tgId: "", subId: $sub, comment: "default", reset: 0
+    }]}')"
+
+HY_GAME_SETTINGS_JSON="$(jq -nc \
+    --arg auth "$HY_AUTH" --arg email "$HY_GAME_EMAIL" --arg sub "$HY_SUBID" \
     '{version: 2, clients: [{
         auth: $auth, email: $email, limitIp: 0, totalGB: 0, expiryTime: 0,
         enable: true, tgId: "", subId: $sub, comment: "default", reset: 0
@@ -785,6 +796,7 @@ post_inbound() {
 }
 
 post_inbound "$HY_REMARK" "" 443 hysteria "$HY_SETTINGS_JSON" "$HY_STREAM_JSON"
+post_inbound "$HY_GAME_REMARK" "" "$HY_GAME_PORT" hysteria "$HY_GAME_SETTINGS_JSON" "$HY_STREAM_JSON"
 
 # ---------- 13. VLESS + XHTTP inbound on a unix socket ----------
 green ">>> Creating VLESS+XHTTP inbound on ${XHTTP_SOCK} with DPI-evasive padding"
@@ -846,10 +858,10 @@ for _ in $(seq 1 10); do
     [[ -S "$XHTTP_SOCK" ]] && break
     sleep 1
 done
-if [[ -S "$XHTTP_SOCK" ]]; then
-    chgrp www-data "$XHTTP_SOCK" 2>/dev/null || true
-    chmod 0660     "$XHTTP_SOCK" 2>/dev/null || true
-fi
+[[ -S "$XHTTP_SOCK" ]] \
+    || die "xray did not create XHTTP unix socket at ${XHTTP_SOCK}; check x-ui logs for xray config errors"
+chgrp www-data "$XHTTP_SOCK" 2>/dev/null || true
+chmod 0660     "$XHTTP_SOCK" 2>/dev/null || true
 
 # ---------- 14. fail2ban for the panel ----------
 green ">>> Configuring fail2ban for the 3x-ui panel"
@@ -899,8 +911,11 @@ cat > "$INSTALL_META" <<EOF
   },
   "hysteria2": {
     "port":     443,
+    "game_port": ${HY_GAME_PORT},
     "remark":   "${HY_REMARK}",
+    "game_remark": "${HY_GAME_REMARK}",
     "default_email": "${HY_EMAIL}",
+    "default_game_email": "${HY_GAME_EMAIL}",
     "default_sub":   "${HY_SUBID}",
     "default_auth":  "${HY_AUTH}",
     "obfs":          "salamander",
@@ -951,9 +966,11 @@ curl -fsS --max-time 5 "https://\${DOMAIN}/" -o /dev/null \\
 curl -ks --max-time 5 --resolve "\${DOMAIN}:443:127.0.0.1" "https://\${DOMAIN}\${PATH_}" -o /dev/null \\
     || errs+=("3x-ui panel not responding through nginx 443")
 
-# 3. Hysteria2 listens on UDP/443.
+# 3. Hysteria2 listens on UDP/443 and UDP/${HY_GAME_PORT}.
 ss -ulpn 'sport = :443' 2>/dev/null | grep -q ':443'  \\
     || errs+=("hysteria2: nothing listening on UDP/443")
+ss -ulpn 'sport = :${HY_GAME_PORT}' 2>/dev/null | grep -q ':${HY_GAME_PORT}'  \\
+    || errs+=("hysteria2: nothing listening on UDP/${HY_GAME_PORT}")
 
 # 4. XHTTP unix socket exists.
 [[ -S "\$(jq -r .xhttp.socket "\$META")" ]] \\
@@ -1012,6 +1029,7 @@ EOF
 
 # ---------- 16. share-link generation ----------
 HY_LINK="hysteria2://${HY_AUTH}@${DOMAIN}:443/?sni=${DOMAIN}&alpn=h3&obfs=salamander&obfs-password=${HY_OBFS_PASSWORD}#$(printf '%s' "$HY_REMARK" | jq -sRr @uri)"
+HY_GAME_LINK="hysteria2://${HY_AUTH}@${DOMAIN}:${HY_GAME_PORT}/?sni=${DOMAIN}&alpn=h3&obfs=salamander&obfs-password=${HY_OBFS_PASSWORD}#$(printf '%s' "$HY_GAME_REMARK" | jq -sRr @uri)"
 
 # VLESS XHTTP link with TLS, ALPN h2,http/1.1 (matches what nginx advertises),
 # uTLS chrome, mode=auto. Padding params are not put in the link — stored on the
@@ -1051,13 +1069,15 @@ Internal     : https://127.0.0.1:${PANEL_PORT}/${PANEL_PATH}/
 Username     : ${PANEL_USER}
 Password     : ${PANEL_PASS}
 
---- Hysteria2 inbound (UDP 443, native QUIC, ALPN h3) ---
+--- Hysteria2 inbounds (native QUIC, ALPN h3) ---
 SNI          : ${DOMAIN}
 Auth         : ${HY_AUTH}
 Obfs         : salamander
 Obfs password: ${HY_OBFS_PASSWORD}
-Email        : ${HY_EMAIL}
-Share link   : ${HY_LINK}
+UDP/443 email: ${HY_EMAIL}
+UDP/443 link : ${HY_LINK}
+UDP/${HY_GAME_PORT} email: ${HY_GAME_EMAIL}
+UDP/${HY_GAME_PORT} link : ${HY_GAME_LINK}
 
 --- VLESS + XHTTP inbound (TCP 443, behind nginx, unix socket) ---
 Path         : /${XHTTP_PATH}/
@@ -1109,11 +1129,14 @@ blue "--- Hysteria2 share link (QR) ---"
 echo  "$HY_LINK"
 qrencode -t ANSIUTF8 -m 1 -- "$HY_LINK" || true
 echo
+blue "--- Hysteria2 game-port share link (QR) ---"
+echo  "$HY_GAME_LINK"
+qrencode -t ANSIUTF8 -m 1 -- "$HY_GAME_LINK" || true
+echo
 blue "--- VLESS+XHTTP share link (QR) ---"
 echo  "$XHTTP_LINK"
 qrencode -t ANSIUTF8 -m 1 -- "$XHTTP_LINK" || true
 echo
 
-yellow "Two transports ready: Hysteria2 on UDP/443 (preferred), VLESS+XHTTP on"
-yellow "TCP/443 as a fallback when UDP is filtered upstream. Both share the"
-yellow "same domain, certificate and decoy site."
+yellow "Transports ready: Hysteria2 on UDP/443, Hysteria2 on UDP/${HY_GAME_PORT}"
+yellow "for networks that treat game UDP differently, and VLESS+XHTTP on TCP/443."

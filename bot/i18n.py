@@ -82,15 +82,15 @@ _T: dict[str, dict[Lang, str]] = {
         "ru": ("✅ Доступ выдан.\n\n"
                "Адрес подписки:\n<code>{sub_url}</code>\n\n"
                "Это один URL, который твой клиент сам разворачивает в "
-               "оба транспорта (Hysteria2 / UDP-443 и VLESS+XHTTP / TCP-443). "
+               "транспорты ({transports}). "
                "Просто вставь его в раздел «подписка / subscription» твоего "
                "приложения.\n\n"
                "/instructions — пошагово под твою платформу.\n"
                "/rotate — отозвать ключи и выдать новые, если что-то утекло."),
         "en": ("✅ Access granted.\n\n"
                "Subscription URL:\n<code>{sub_url}</code>\n\n"
-               "One URL — your client expands it to both transports "
-               "(Hysteria2 over UDP/443 and VLESS+XHTTP over TCP/443). Paste "
+               "One URL — your client expands it to the transports "
+               "({transports}). Paste "
                "it into the «subscription» section of your app.\n\n"
                "/instructions — step-by-step setup for your platform.\n"
                "/rotate — wipe and reissue keys if something leaked."),
@@ -112,12 +112,24 @@ _T: dict[str, dict[Lang, str]] = {
     "connect.body": {
         "ru": ("Адрес подписки:\n<code>{sub_url}</code>\n\n"
                "Если приложение не понимает подписку, вот прямые ссылки:\n\n"
-               "Hysteria2 (рекомендую):\n<code>{hy_link}</code>\n\n"
+               "Hysteria2 UDP/443:\n<code>{hy_link}</code>{hy_game_block}\n\n"
                "VLESS XHTTP (TCP-fallback):\n<code>{xhttp_link}</code>"),
         "en": ("Subscription URL:\n<code>{sub_url}</code>\n\n"
                "Direct links if your app doesn't speak subscription:\n\n"
-               "Hysteria2 (recommended):\n<code>{hy_link}</code>\n\n"
+               "Hysteria2 UDP/443:\n<code>{hy_link}</code>{hy_game_block}\n\n"
                "VLESS XHTTP (TCP fallback):\n<code>{xhttp_link}</code>"),
+    },
+    "connect.hy_game_block": {
+        "ru": "\n\nHysteria2 UDP/19132 (game-port):\n<code>{hy_game_link}</code>",
+        "en": "\n\nHysteria2 UDP/19132 (game-port):\n<code>{hy_game_link}</code>",
+    },
+    "transport.summary.base": {
+        "ru": "Hysteria2 / UDP-443 и VLESS+XHTTP / TCP-443",
+        "en": "Hysteria2 over UDP/443 and VLESS+XHTTP over TCP/443",
+    },
+    "transport.summary.game": {
+        "ru": "Hysteria2 / UDP-443, Hysteria2 / UDP-19132 и VLESS+XHTTP / TCP-443",
+        "en": "Hysteria2 over UDP/443, Hysteria2 over UDP/19132, and VLESS+XHTTP over TCP/443",
     },
     "rotate.done": {
         "ru": ("🔁 Ключи перевыпущены. Старые отозваны, можешь их забыть.\n\n"

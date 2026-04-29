@@ -47,6 +47,7 @@ client ── QUIC ──────────► xray  :443/udp             
 | 443/tcp /\<secret\>/ | nginx → xray VLESS+XHTTP via unix socket             |
 | 443/tcp /\<sub\>/    | nginx → 3x-ui subscription server (127.0.0.1:2096)   |
 | 443/udp   | xray — Hysteria2, ALPN h3, Salamander obfs                       |
+| 19132/udp | xray — second Hysteria2 inbound on a Minecraft Bedrock-like port  |
 | 443/tcp /\<panel\>/ | nginx → 3x-ui admin panel (127.0.0.1 random port) |
 | local 8765 | bot's hook server (alert + backup, 127.0.0.1 only)              |
 
@@ -68,10 +69,13 @@ client ── QUIC ──────────► xray  :443/udp             
 
 ## DPI evasion settings
 
-Hysteria2 is created with Salamander obfs enabled by default. The installer
-generates a per-install password, stores it in `/etc/x-ui-hybrid/install.json`,
-prints it in the operator summary, and includes `obfs=salamander` plus
-`obfs-password=<secret>` in generated `hysteria2://` links.
+Hysteria2 is created with Salamander obfs enabled by default on both `443/udp`
+and `19132/udp`. `19132/udp` intentionally resembles a Minecraft Bedrock game
+port for mobile networks that treat game UDP differently from QUIC/H3. The
+installer generates a per-install password, stores it in
+`/etc/x-ui-hybrid/install.json`, prints it in the operator summary, and includes
+`obfs=salamander` plus `obfs-password=<secret>` in generated `hysteria2://`
+links.
 
 ### XHTTP
 

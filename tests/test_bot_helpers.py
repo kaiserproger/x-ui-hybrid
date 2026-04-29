@@ -1,5 +1,7 @@
 """Pure-function tests for bot helpers (no network, no Telegram)."""
 
+import json
+
 from urllib.parse import parse_qs, unquote, urlparse
 
 import pytest
@@ -7,6 +9,7 @@ import pytest
 from bot import i18n
 from bot.helpers import (
     REMARK_HY,
+    REMARK_HY_GAME,
     REMARK_XHTTP,
     Meta,
     email_for,
@@ -33,6 +36,7 @@ def make_meta() -> Meta:
         xhttp_padding_key="deadbeef",
         cert_fullchain="/etc/ssl/v.pem",
         hy_obfs_password="obfs-secret",
+        hy_game_port=19132,
     )
 
 
@@ -54,7 +58,7 @@ def test_i18n_t_format():
 
 
 def test_i18n_falls_back_to_en():
-    assert i18n.t("connect.body", "fr", sub_url="x", hy_link="y", xhttp_link="z")
+    assert i18n.t("connect.body", "fr", sub_url="x", hy_link="y", hy_game_block="", xhttp_link="z")
     # Unknown key — return key (debugging aid, not crash).
     assert i18n.t("does.not.exist", "en") == "does.not.exist"
 
@@ -103,6 +107,43 @@ def test_hy_share_link_format():
     assert q["obfs"] == ["salamander"]
     assert q["obfs-password"] == ["obfs-secret"]
     assert unquote(p.fragment) == REMARK_HY
+
+
+def test_hy_game_share_link_format():
+    meta = make_meta()
+    assert meta.hy_game_port is not None
+    link = hy_share_link(meta, "AUTH123", REMARK_HY_GAME, meta.hy_game_port)
+    p = urlparse(link)
+    assert p.scheme == "hysteria2"
+    assert p.username == "AUTH123"
+    assert p.hostname == "vpn.example.org"
+    assert p.port == 19132
+    assert unquote(p.fragment) == REMARK_HY_GAME
+
+
+def test_meta_load_old_install_without_game_port(tmp_path):
+    install_json = tmp_path / "install.json"
+    install_json.write_text(json.dumps({
+        "domain": "vpn.example.org",
+        "panel": {
+            "host": "127.0.0.1",
+            "port": 31000,
+            "path": "/panel/",
+            "user": "admin",
+            "pass": "x",
+        },
+        "subscription": {"public_url": "https://vpn.example.org/sub"},
+        "xhttp": {
+            "path": "abc123",
+            "padding_header": "X-Trace-Id",
+            "padding_key": "deadbeef",
+        },
+        "cert": {"fullchain": "/etc/ssl/v.pem"},
+        "hysteria2": {"obfs_password": "obfs-secret"},
+    }))
+
+    meta = Meta.load(install_json)
+    assert meta.hy_game_port is None
 
 
 def test_xhttp_share_link_carries_path():

@@ -170,6 +170,22 @@ if [[ "$url" == */login ]]; then
 fi
 
 if [[ "$url" == */panel/api/inbounds/add ]]; then
+    if printf '%s\n' "$@" | grep -q '/run/x-ui-hybrid/xhttp.sock'; then
+        python3 - <<'PY'
+import os
+import socket
+
+path = "/run/x-ui-hybrid/xhttp.sock"
+os.makedirs(os.path.dirname(path), exist_ok=True)
+try:
+    os.unlink(path)
+except FileNotFoundError:
+    pass
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.bind(path)
+s.close()
+PY
+    fi
     printf '{"success":true}'
     exit 0
 fi
@@ -228,12 +244,15 @@ docker run --rm \
         jq -e ".panel.url | startswith(\"https://'"$DOMAIN"'/\")" /etc/x-ui-hybrid/install.json >/dev/null
         jq -e ".panel.port != 10587" /etc/x-ui-hybrid/install.json >/dev/null
         jq -e ".panel.path != \"/upstream-secret/\"" /etc/x-ui-hybrid/install.json >/dev/null
+        jq -e ".hysteria2.game_port == 19132" /etc/x-ui-hybrid/install.json >/dev/null
+        jq -e ".hysteria2.default_game_email == \"default-hy2-19132\"" /etc/x-ui-hybrid/install.json >/dev/null
 
         recovery_url="$(jq -r .panel.url /etc/x-ui-hybrid/panel-recovery.json)"
         final_url="$(jq -r .panel.url /etc/x-ui-hybrid/install.json)"
         test "$recovery_url" = "$final_url"
 
         grep -q "x-ui-hybrid deployment summary" /root/x-ui-hybrid-credentials.txt
+        grep -q "UDP/19132 link" /root/x-ui-hybrid-credentials.txt
         grep -q "Full install log" /var/log/x-ui-hybrid-install.log
     '
 

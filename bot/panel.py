@@ -7,7 +7,7 @@ We log in once with username/password, keep a session cookie, and call:
   POST /<base>/panel/api/inbounds/{inbound_id}/delClientByEmail/{email}
 
 Inbounds are referenced by their `remark` string the installer set:
-  * Hysteria2: "Hysteria2 QUIC :443"
+  * Hysteria2: "Hysteria2 QUIC :443" and optional game-port variant
   * XHTTP:     "VLESS XHTTP :443 (TLS at nginx, unix socket)"
 """
 

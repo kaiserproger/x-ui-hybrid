@@ -44,6 +44,8 @@ check "install.sh creates xhttp inbound" \
     grep -q 'XHTTP_REMARK' "$ROOT/install.sh"
 check "install.sh enables hysteria salamander obfs" \
     grep -q 'salamander' "$ROOT/install.sh"
+check "install.sh creates game-port hysteria inbound" \
+    grep -q 'HY_GAME_PORT=19132' "$ROOT/install.sh"
 check "install.sh sets DPI-evasion fields" \
     grep -q 'xPaddingObfsMode' "$ROOT/install.sh"
 check "install.sh uses valid xhttp padding method" \

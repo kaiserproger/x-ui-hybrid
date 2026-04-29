@@ -50,7 +50,7 @@ from aiohttp import web
 from . import i18n
 from .db import Store, User
 from .helpers import (
-    Meta, REMARK_HY, REMARK_XHTTP,
+    Meta, REMARK_HY, REMARK_HY_GAME, REMARK_XHTTP,
     email_for, gen_secrets, hy_client_dict, hy_share_link,
     sub_url_for, xhttp_client_dict, xhttp_share_link,
 )
@@ -120,6 +120,20 @@ def display_name(user: User) -> str:
 
 def sub_url(meta: Meta, user: User) -> str:
     return sub_url_for(meta, user.sub_id)
+
+
+def transport_summary(meta: Meta, lang: str) -> str:
+    key = "transport.summary.game" if meta.hy_game_port else "transport.summary.base"
+    return i18n.t(key, lang)
+
+
+def hy_game_block(meta: Meta, lang: str, hy_auth: str) -> str:
+    if not meta.hy_game_port:
+        return ""
+    return i18n.t(
+        "connect.hy_game_block", lang,
+        hy_game_link=hy_share_link(meta, hy_auth, REMARK_HY_GAME, meta.hy_game_port),
+    )
 
 
 # --------------------------------------------------------------------------
@@ -210,6 +224,7 @@ async def cmd_connect(msg: Message) -> None:
     body = i18n.t("connect.body", lang,
                   sub_url=sub_url(ctx.meta, user),
                   hy_link=hy_share_link(ctx.meta, user.hy_auth or ""),
+                  hy_game_block=hy_game_block(ctx.meta, lang, user.hy_auth or ""),
                   xhttp_link=xhttp_share_link(ctx.meta, user.xhttp_uuid or ""))
     await msg.answer(body)
 
@@ -447,7 +462,8 @@ async def do_approve(ctx: AppCtx, target_id: int, *,
         await ctx.bot.send_message(
             target_id,
             i18n.t("approved.user", lang_of(user),
-                   sub_url=sub_url(ctx.meta, user)))
+                   sub_url=sub_url(ctx.meta, user),
+                   transports=transport_summary(ctx.meta, lang_of(user))))
     except (TelegramBadRequest, TelegramForbiddenError):
         pass
 
@@ -488,6 +504,13 @@ async def create_user_clients(ctx: AppCtx, user: User, *,
     xhttp_in = await ctx.panel.find_inbound(remark=REMARK_XHTTP)
     await ctx.panel.add_client(hy_in.inbound_id, hy_client_dict(
         email=email_for(user.tg_id, "hy"), sub_id=sub, auth=hy_auth))
+    if ctx.meta.hy_game_port:
+        try:
+            hy_game_in = await ctx.panel.find_inbound(remark=REMARK_HY_GAME)
+            await ctx.panel.add_client(hy_game_in.inbound_id, hy_client_dict(
+                email=email_for(user.tg_id, "hy19132"), sub_id=sub, auth=hy_auth))
+        except PanelError as e:
+            logger.warning("add game-port hy client failed: %s", e)
     await ctx.panel.add_client(xhttp_in.inbound_id, xhttp_client_dict(
         email=email_for(user.tg_id, "xhttp"), sub_id=sub, uuid_=xhttp_uuid))
 
@@ -498,6 +521,12 @@ async def delete_user_clients(ctx: AppCtx, user: User) -> None:
         await ctx.panel.del_client_by_email(hy_in.inbound_id, email_for(user.tg_id, "hy"))
     except PanelError as e:
         logger.warning("delete hy client failed: %s", e)
+    if ctx.meta.hy_game_port:
+        try:
+            hy_game_in = await ctx.panel.find_inbound(remark=REMARK_HY_GAME)
+            await ctx.panel.del_client_by_email(hy_game_in.inbound_id, email_for(user.tg_id, "hy19132"))
+        except PanelError as e:
+            logger.warning("delete game-port hy client failed: %s", e)
     try:
         xhttp_in = await ctx.panel.find_inbound(remark=REMARK_XHTTP)
         await ctx.panel.del_client_by_email(xhttp_in.inbound_id, email_for(user.tg_id, "xhttp"))
