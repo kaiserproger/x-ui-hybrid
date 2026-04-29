@@ -32,6 +32,7 @@ def make_meta() -> Meta:
         xhttp_padding_header="X-Trace-Id",
         xhttp_padding_key="deadbeef",
         cert_fullchain="/etc/ssl/v.pem",
+        hy_obfs_password="obfs-secret",
     )
 
 
@@ -99,6 +100,8 @@ def test_hy_share_link_format():
     q = parse_qs(p.query)
     assert q["sni"] == ["vpn.example.org"]
     assert q["alpn"] == ["h3"]
+    assert q["obfs"] == ["salamander"]
+    assert q["obfs-password"] == ["obfs-secret"]
     assert unquote(p.fragment) == REMARK_HY
 
 

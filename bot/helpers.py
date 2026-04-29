@@ -31,6 +31,7 @@ class Meta:
     xhttp_padding_header: str
     xhttp_padding_key: str
     cert_fullchain: str
+    hy_obfs_password: str = ""
 
     @classmethod
     def load(cls, path: Path) -> "Meta":
@@ -46,6 +47,7 @@ class Meta:
             xhttp_padding_header=data["xhttp"]["padding_header"],
             xhttp_padding_key=data["xhttp"]["padding_key"],
             cert_fullchain=data["cert"]["fullchain"],
+            hy_obfs_password=data.get("hysteria2", {}).get("obfs_password", ""),
         )
 
 
@@ -66,8 +68,11 @@ def sub_url_for(meta: Meta, sub_id: str | None) -> str:
 
 
 def hy_share_link(meta: Meta, auth: str, remark: str = REMARK_HY) -> str:
-    return (f"hysteria2://{auth}@{meta.domain}:443/"
-            f"?sni={meta.domain}&alpn=h3#{quote(remark)}")
+    query = f"sni={meta.domain}&alpn=h3"
+    if meta.hy_obfs_password:
+        obfs_password = quote(meta.hy_obfs_password, safe="")
+        query += f"&obfs=salamander&obfs-password={obfs_password}"
+    return f"hysteria2://{auth}@{meta.domain}:443/?{query}#{quote(remark)}"
 
 
 def xhttp_share_link(meta: Meta, uuid_: str, remark: str = REMARK_XHTTP) -> str:

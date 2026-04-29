@@ -35,8 +35,12 @@ check "install.sh wires sysctl tuning" \
     grep -q '99-x-ui-hybrid.conf' "$ROOT/install.sh"
 check "install.sh creates xhttp inbound" \
     grep -q 'XHTTP_REMARK' "$ROOT/install.sh"
+check "install.sh enables hysteria salamander obfs" \
+    grep -q 'salamander' "$ROOT/install.sh"
 check "install.sh sets DPI-evasion fields" \
     grep -q 'xPaddingObfsMode' "$ROOT/install.sh"
+check "install.sh uses valid xhttp padding method" \
+    grep -q 'xPaddingMethod:        "tokenish"' "$ROOT/install.sh"
 check "install.sh installs healthcheck" \
     grep -q 'x-ui-hybrid-healthcheck' "$ROOT/install.sh"
 check "install.sh installs backup" \

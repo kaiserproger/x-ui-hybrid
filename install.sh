@@ -344,12 +344,13 @@ systemctl reload nginx
 # ---------- 8. firewall ----------
 green ">>> Opening firewall ports"
 if command -v ufw >/dev/null 2>&1; then
-    ufw --force enable     >/dev/null 2>&1 || true
+    # Never enable UFW before SSH is explicitly allowed on a remote VPS.
     ufw allow 22/tcp       >/dev/null 2>&1 || true
     ufw allow 80/tcp       >/dev/null 2>&1 || true
     ufw allow 443/tcp      >/dev/null 2>&1 || true
     ufw allow 443/udp      >/dev/null 2>&1 || true
     ufw allow "${PANEL_PORT}"/tcp >/dev/null 2>&1 || true
+    ufw --force enable     >/dev/null 2>&1 || true
     # Subscription server stays bound to 127.0.0.1 — never opened externally.
 fi
 
@@ -414,6 +415,7 @@ echo "$login_resp" | jq -e '.success == true' >/dev/null 2>&1 \
     || die "Panel login failed. Response: $login_resp"
 
 HY_AUTH="$(openssl rand -hex 16)"
+HY_OBFS_PASSWORD="$(openssl rand -hex 16)"
 HY_EMAIL="default-hy2"
 HY_SUBID="$(openssl rand -hex 8)"
 HY_REMARK="Hysteria2 QUIC :443"
@@ -429,10 +431,14 @@ HY_STREAM_JSON="$(jq -nc \
     --arg sni "$DOMAIN" \
     --arg cert "$CERT_DIR/fullchain.pem" \
     --arg key  "$CERT_DIR/privkey.pem" \
+    --arg obfs "$HY_OBFS_PASSWORD" \
     '{
         network: "hysteria",
         security: "tls",
         externalProxy: [],
+        finalmask: {
+            udp: [{type: "salamander", settings: {password: $obfs}}]
+        },
         tlsSettings: {
             serverName: $sni,
             minVersion: "1.2", maxVersion: "1.3",
@@ -515,7 +521,7 @@ XHTTP_STREAM_JSON="$(jq -nc \
             xPaddingKey:           $padk,
             xPaddingHeader:        $padh,
             xPaddingPlacement:     "header",
-            xPaddingMethod:        "header-value",
+            xPaddingMethod:        "tokenish",
             uplinkHTTPMethod:      "POST"
         }
     }')"
@@ -586,7 +592,9 @@ cat > "$INSTALL_META" <<EOF
     "remark":   "${HY_REMARK}",
     "default_email": "${HY_EMAIL}",
     "default_sub":   "${HY_SUBID}",
-    "default_auth":  "${HY_AUTH}"
+    "default_auth":  "${HY_AUTH}",
+    "obfs":          "salamander",
+    "obfs_password": "${HY_OBFS_PASSWORD}"
   },
   "xhttp": {
     "remark":           "${XHTTP_REMARK}",
@@ -693,7 +701,7 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 EOF
 
 # ---------- 16. share-link generation ----------
-HY_LINK="hysteria2://${HY_AUTH}@${DOMAIN}:443/?sni=${DOMAIN}&alpn=h3#$(printf '%s' "$HY_REMARK" | jq -sRr @uri)"
+HY_LINK="hysteria2://${HY_AUTH}@${DOMAIN}:443/?sni=${DOMAIN}&alpn=h3&obfs=salamander&obfs-password=${HY_OBFS_PASSWORD}#$(printf '%s' "$HY_REMARK" | jq -sRr @uri)"
 
 # VLESS XHTTP link with TLS, ALPN h2,http/1.1 (matches what nginx advertises),
 # uTLS chrome, mode=auto. Padding params are not put in the link — stored on the
@@ -735,6 +743,8 @@ Password     : ${PANEL_PASS}
 --- Hysteria2 inbound (UDP 443, native QUIC, ALPN h3) ---
 SNI          : ${DOMAIN}
 Auth         : ${HY_AUTH}
+Obfs         : salamander
+Obfs password: ${HY_OBFS_PASSWORD}
 Email        : ${HY_EMAIL}
 Share link   : ${HY_LINK}
 
@@ -743,7 +753,7 @@ Path         : /${XHTTP_PATH}/
 UUID         : ${XHTTP_UUID}
 Email        : ${XHTTP_EMAIL}
 Mode         : auto · stream-up via nginx HTTP/1.1
-Padding      : 256-2048 bytes, obfs in header "${XHTTP_PADDING_HEADER}"
+Padding      : 256-2048 bytes, tokenish obfs in header "${XHTTP_PADDING_HEADER}"
 Padding key  : ${XHTTP_PADDING_KEY}
 Share link   : ${XHTTP_LINK}
 

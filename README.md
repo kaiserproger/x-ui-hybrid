@@ -3,7 +3,7 @@
 One-shot installer that puts a hardened proxy stack on a single Linux box:
 
 - **3x-ui (xray-core)** panel.
-- **Hysteria2** on UDP/443 — native QUIC, ALPN h3, no TCP-over-TCP.
+- **Hysteria2** on UDP/443 — native QUIC, ALPN h3, Salamander obfs, no TCP-over-TCP.
 - **VLESS+XHTTP** on TCP/443 fronted by nginx, talking to xray over a unix
   socket, with DPI-evasive padding obfuscated inside an observability-style
   HTTP header.
@@ -45,7 +45,7 @@ client ── QUIC ──────────► xray  :443/udp             
 | 443/tcp / | nginx — geo-aware decoy site (HSTS, OCSP stapling)               |
 | 443/tcp /\<secret\>/ | nginx → xray VLESS+XHTTP via unix socket             |
 | 443/tcp /\<sub\>/    | nginx → 3x-ui subscription server (127.0.0.1:2096)   |
-| 443/udp   | xray — Hysteria2, ALPN h3                                        |
+| 443/udp   | xray — Hysteria2, ALPN h3, Salamander obfs                       |
 | panel     | 3x-ui admin panel (random port, same cert)                       |
 | local 8765 | bot's hook server (alert + backup, 127.0.0.1 only)              |
 
@@ -65,7 +65,14 @@ client ── QUIC ──────────► xray  :443/udp             
   renders one of five hand-written layouts (editorial / studio_dark /
   brutalist / boutique / press) with a randomised palette and font pairing.
 
-## DPI evasion settings (XHTTP)
+## DPI evasion settings
+
+Hysteria2 is created with Salamander obfs enabled by default. The installer
+generates a per-install password, stores it in `/etc/x-ui-hybrid/install.json`,
+prints it in the operator summary, and includes `obfs=salamander` plus
+`obfs-password=<secret>` in generated `hysteria2://` links.
+
+### XHTTP
 
 The installer turns on every padding/obfuscation knob that current xray-core
 supports for XHTTP:
@@ -76,7 +83,7 @@ supports for XHTTP:
 | `xPaddingBytes`     | `256-2048`             | wide range — frame sizes don't fingerprint       |
 | `xPaddingObfsMode`  | `true`                 | padding hidden in obfuscated HTTP header         |
 | `xPaddingPlacement` | `header`               | inside header value, not body                    |
-| `xPaddingMethod`    | `header-value`         |                                                  |
+| `xPaddingMethod`    | `tokenish`             | token-like header value accepted by current xray-core |
 | `xPaddingHeader`    | random from realistic pool | `X-Trace-Id`, `X-Datadog-Trace-Id`, `Sentry-Trace`, … — looks like real observability traffic |
 | `xPaddingKey`       | random 32-hex          | per-install secret; without it padding looks like noise |
 | `scStreamUpServerSecs` | `30-90`             | longer streams → fewer reconnect signals         |
@@ -154,7 +161,7 @@ Operator summary lands at `/root/x-ui-hybrid-credentials.txt` (chmod 600).
 It includes:
 
 - panel URL + creds
-- Hysteria2 share link + auth + QR (rendered to terminal as ANSI art)
+- Hysteria2 share link + auth + Salamander obfs password + QR (rendered to terminal as ANSI art)
 - VLESS+XHTTP share link + UUID + QR
 - subscription public URL
 - decoy persona + layout summary
