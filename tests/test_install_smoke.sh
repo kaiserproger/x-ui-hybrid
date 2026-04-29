@@ -54,6 +54,10 @@ check "install.sh installs backup" \
     grep -q 'x-ui-hybrid-backup' "$ROOT/install.sh"
 check "install.sh redirects bare panel path" \
     grep -Fq 'location = /${PANEL_PATH}' "$ROOT/install.sh"
+check "install.sh proxies subscription over TLS" \
+    grep -Fq 'proxy_pass https://127.0.0.1:${SUB_PORT_INTERNAL}/sub/;' "$ROOT/install.sh"
+check "install.sh probes subscription over TLS" \
+    grep -Fq 'https://127.0.0.1:${SUB_PORT_INTERNAL}/sub/__probe__' "$ROOT/install.sh"
 check "install.sh writes meta JSON" \
     grep -qE 'INSTALL_META=.*install\.json' "$ROOT/install.sh"
 check "install.sh writes early panel recovery" \

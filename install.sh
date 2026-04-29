@@ -580,13 +580,14 @@ server {
     }
 
     # ---- 3x-ui subscription server, reverse-proxied at a secret prefix ----
-    # 3x-ui's subscription server listens on 127.0.0.1:${SUB_PORT_INTERNAL}/sub/
+    # 3x-ui's subscription server listens with TLS on 127.0.0.1:${SUB_PORT_INTERNAL}/sub/
     # We expose it under /${SUB_PATH}/<subId> on 443 so clients only need port 443.
     location /${SUB_PATH}/ {
         limit_req zone=x_ui_hybrid_sub burst=20 nodelay;
 
-        proxy_pass http://127.0.0.1:${SUB_PORT_INTERNAL}/sub/;
+        proxy_pass https://127.0.0.1:${SUB_PORT_INTERNAL}/sub/;
         proxy_http_version 1.1;
+        proxy_ssl_verify off;
         proxy_set_header Host              \$host;
         proxy_set_header X-Real-IP         \$remote_addr;
         proxy_set_header X-Forwarded-For   \$proxy_add_x_forwarded_for;
@@ -702,7 +703,7 @@ write_panel_recovery "applied_to_x-ui"
 green ">>> Waiting for x-ui (panel + subscription server)"
 for _ in $(seq 1 30); do
     curl -ks --max-time 2 --resolve "${DOMAIN}:443:127.0.0.1" "https://${DOMAIN}/${PANEL_PATH}/" >/dev/null \
-        && curl -s --max-time 2 "http://127.0.0.1:${SUB_PORT_INTERNAL}/sub/__probe__" -o /dev/null \
+        && curl -ks --max-time 2 "https://127.0.0.1:${SUB_PORT_INTERNAL}/sub/__probe__" -o /dev/null \
         && break
     sleep 1
 done
