@@ -20,6 +20,7 @@ check() {
 check "bash -n install.sh"        bash -n "$ROOT/install.sh"
 check "bash -n install-bot.sh"    bash -n "$ROOT/bot/install-bot.sh"
 check "bash -n smoke (this file)" bash -n "$0"
+check "bash -n docker e2e"        bash -n "$ROOT/tests/test_install_e2e_docker.sh"
 
 # ---- python syntax ----
 for f in landing.py bot/bot.py bot/db.py bot/panel.py bot/i18n.py bot/instructions.py; do
@@ -53,6 +54,10 @@ check "install.sh redirects bare panel path" \
     grep -Fq 'location = /${PANEL_PATH}' "$ROOT/install.sh"
 check "install.sh writes meta JSON" \
     grep -qE 'INSTALL_META=.*install\.json' "$ROOT/install.sh"
+check "install.sh writes early panel recovery" \
+    grep -q 'panel-recovery.json' "$ROOT/install.sh"
+check "install.sh has failure diagnostics" \
+    grep -q 'run_failure_diagnostics' "$ROOT/install.sh"
 check "install.sh prints QR codes" \
     grep -q 'qrencode' "$ROOT/install.sh"
 check "install-bot.sh writes systemd unit" \

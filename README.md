@@ -330,6 +330,18 @@ bash tests/test_install_smoke.sh
 greps that catch the common "feature dropped from install.sh" regression
 (missing `--bot-token` flag, no XHTTP padding, missing healthcheck, …).
 
+### Docker installer e2e
+
+```bash
+bash tests/test_install_e2e_docker.sh
+```
+
+Runs `install.sh` inside a disposable Debian container. The test mocks ACME,
+the upstream 3x-ui installer, systemd/nginx/ufw and panel HTTP responses, then
+checks that the install reaches the final summary and that the saved panel URL
+comes from x-ui-hybrid's rewritten `install.json`, not the temporary upstream
+`:10587` URL printed by 3x-ui.
+
 ## Troubleshooting
 
 - **acme.sh fails with "Invalid response"** — DNS isn't propagated yet, or

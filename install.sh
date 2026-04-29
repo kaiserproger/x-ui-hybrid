@@ -17,7 +17,7 @@
 #
 # Tested: Ubuntu 22.04/24.04, Debian 11/12.
 
-set -euo pipefail
+set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
@@ -25,7 +25,101 @@ red()    { printf '\033[0;31m%s\033[0m\n' "$*"; }
 green()  { printf '\033[0;32m%s\033[0m\n' "$*"; }
 yellow() { printf '\033[0;33m%s\033[0m\n' "$*"; }
 blue()   { printf '\033[0;34m%s\033[0m\n' "$*"; }
-die()    { red "ERROR: $*" >&2; exit 1; }
+
+DIAGNOSTICS_RAN=0
+
+run_failure_diagnostics() {
+    local status="${1:-1}"
+    local line="${2:-unknown}"
+    local cmd="${3:-unknown}"
+
+    [[ $DIAGNOSTICS_RAN -eq 1 ]] && return 0
+    DIAGNOSTICS_RAN=1
+
+    set +e
+    red "ERROR: installer failed with exit code ${status} at line ${line}"
+    red "ERROR: command: ${cmd}"
+    yellow ">>> Diagnostics follow. Full log: ${INSTALL_LOG:-/var/log/x-ui-hybrid-install.log}"
+
+    if command -v x-ui >/dev/null 2>&1; then
+        yellow ">>> x-ui settings"
+        x-ui settings
+    else
+        yellow ">>> x-ui binary is not installed or not in PATH"
+    fi
+
+    if [[ -f /etc/x-ui/x-ui.db ]] && command -v sqlite3 >/dev/null 2>&1; then
+        yellow ">>> selected x-ui database settings"
+        sqlite3 /etc/x-ui/x-ui.db \
+            "SELECT key || '=' || value FROM settings WHERE key IN ('webPort','webBasePath','webListen','webCertFile','webKeyFile','subEnable','subPort','subPath','subListen','subURI') ORDER BY key;"
+    fi
+
+    if command -v systemctl >/dev/null 2>&1; then
+        yellow ">>> service status: x-ui"
+        systemctl status x-ui --no-pager
+        yellow ">>> service status: nginx"
+        systemctl status nginx --no-pager
+    fi
+
+    if command -v journalctl >/dev/null 2>&1; then
+        yellow ">>> recent x-ui journal"
+        journalctl -u x-ui -n 120 --no-pager
+        yellow ">>> recent nginx journal"
+        journalctl -u nginx -n 80 --no-pager
+    fi
+
+    if [[ -n "${DOMAIN:-}" ]]; then
+        yellow ">>> nginx config test"
+        nginx -t
+
+        if [[ -f "/etc/nginx/sites-available/${DOMAIN}.conf" ]]; then
+            yellow ">>> nginx site config: /etc/nginx/sites-available/${DOMAIN}.conf"
+            while IFS= read -r line_text; do
+                printf '    %s\n' "$line_text"
+            done < "/etc/nginx/sites-available/${DOMAIN}.conf"
+        fi
+
+        yellow ">>> HTTP probe: decoy root via nginx"
+        curl -ksS --max-time 8 --resolve "${DOMAIN}:443:127.0.0.1" \
+            -o /dev/null -w "https://${DOMAIN}/ -> HTTP %{http_code}, remote=%{remote_ip}:%{remote_port}, err=%{errormsg}\n" \
+            "https://${DOMAIN}/"
+    fi
+
+    if [[ -n "${DOMAIN:-}" && -n "${PANEL_PATH:-}" ]]; then
+        yellow ">>> HTTP probe: panel path via nginx"
+        curl -ksS --max-time 8 --resolve "${DOMAIN}:443:127.0.0.1" \
+            -o /dev/null -w "https://${DOMAIN}/${PANEL_PATH}/ -> HTTP %{http_code}, remote=%{remote_ip}:%{remote_port}, err=%{errormsg}\n" \
+            "https://${DOMAIN}/${PANEL_PATH}/"
+    fi
+
+    if [[ -n "${PANEL_PORT:-}" && -n "${PANEL_PATH:-}" ]]; then
+        yellow ">>> HTTP probe: panel directly on loopback"
+        curl -ksS --max-time 8 \
+            -o /dev/null -w "https://127.0.0.1:${PANEL_PORT}/${PANEL_PATH}/ -> HTTP %{http_code}, err=%{errormsg}\n" \
+            "https://127.0.0.1:${PANEL_PORT}/${PANEL_PATH}/"
+
+        yellow ">>> TCP listeners for panel port ${PANEL_PORT}"
+        ss -ltnp "sport = :${PANEL_PORT}"
+    fi
+
+    yellow ">>> TCP/UDP listeners on 443"
+    ss -ltnup 'sport = :443'
+}
+
+on_error() {
+    local status="$1"
+    local line="$2"
+    local cmd="$3"
+    trap - ERR
+    run_failure_diagnostics "$status" "$line" "$cmd"
+    exit "$status"
+}
+
+die() {
+    red "ERROR: $*" >&2
+    run_failure_diagnostics 1 "manual" "$*"
+    exit 1
+}
 
 usage() {
     cat <<USAGE
@@ -145,6 +239,15 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 [[ $EUID -ne 0 ]] && die "Run as root."
+
+INSTALL_LOG=/var/log/x-ui-hybrid-install.log
+touch "$INSTALL_LOG"
+chmod 600 "$INSTALL_LOG"
+exec > >(tee -a "$INSTALL_LOG") 2>&1
+trap 'on_error $? $LINENO "$BASH_COMMAND"' ERR
+
+green ">>> x-ui-hybrid installer started at $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+green ">>> Full install log: $INSTALL_LOG"
 
 if [[ $UNINSTALL -eq 1 ]]; then
     uninstall_stack "$DOMAIN" "$PURGE"
@@ -478,7 +581,7 @@ x-ui cert    -webCert "$CERT_DIR/fullchain.pem" -webCertKey "$CERT_DIR/privkey.p
 # Make the path match nginx's secret prefix and bind the listener to loopback.
 XUI_DB="/etc/x-ui/x-ui.db"
 [[ -f "$XUI_DB" ]] || die "x-ui database not found at $XUI_DB after install."
-if ! sqlite3 "$XUI_DB" <<SQL
+if ! sqlite3 "$XUI_DB" >/dev/null <<SQL
 PRAGMA busy_timeout=10000;
 INSERT OR REPLACE INTO settings (key, value) VALUES ('subEnable', 'true');
 INSERT OR REPLACE INTO settings (key, value) VALUES ('subPort',   '${SUB_PORT_INTERNAL}');
@@ -493,6 +596,45 @@ then
 fi
 
 systemctl restart x-ui
+
+# Persist panel access immediately. The following inbound/API steps can fail on
+# upstream 3x-ui changes; without this early recovery file the generated panel
+# password only exists in this shell process.
+ETC_DIR=/etc/x-ui-hybrid
+mkdir -p "$ETC_DIR"
+PANEL_RECOVERY_JSON="${ETC_DIR}/panel-recovery.json"
+cat > "$PANEL_RECOVERY_JSON" <<EOF
+{
+  "domain": "${DOMAIN}",
+  "panel": {
+    "url": "https://${DOMAIN}/${PANEL_PATH}/",
+    "internal": "https://127.0.0.1:${PANEL_PORT}/${PANEL_PATH}/",
+    "host": "127.0.0.1",
+    "port": ${PANEL_PORT},
+    "path": "/${PANEL_PATH}/",
+    "user": "${PANEL_USER}",
+    "pass": "${PANEL_PASS}"
+  }
+}
+EOF
+chmod 600 "$PANEL_RECOVERY_JSON"
+
+SUMMARY=/root/x-ui-hybrid-credentials.txt
+cat > "$SUMMARY" <<EOF
+=== x-ui-hybrid panel recovery ===
+Generated: $(date -u +'%Y-%m-%dT%H:%M:%SZ')
+
+Installation is still in progress. If the installer stops before the final
+summary, these are the panel settings already applied to 3x-ui.
+
+URL      : https://${DOMAIN}/${PANEL_PATH}/
+Internal : https://127.0.0.1:${PANEL_PORT}/${PANEL_PATH}/
+Username : ${PANEL_USER}
+Password : ${PANEL_PASS}
+
+Recovery JSON: ${PANEL_RECOVERY_JSON}
+EOF
+chmod 600 "$SUMMARY"
 
 # ---------- 11. wait for panel + subscription server ----------
 green ">>> Waiting for x-ui (panel + subscription server)"
