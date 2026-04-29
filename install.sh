@@ -820,7 +820,7 @@ XHTTP_STREAM_JSON="$(jq -nc \
         xhttpSettings: {
             path: $path,
             host: $host,
-            headers: [],
+            headers: {},
             mode: "auto",
             scMaxBufferedPosts:    30,
             scMaxEachPostBytes:    "1000000",

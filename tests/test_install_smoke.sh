@@ -48,6 +48,8 @@ check "install.sh sets DPI-evasion fields" \
     grep -q 'xPaddingObfsMode' "$ROOT/install.sh"
 check "install.sh uses valid xhttp padding method" \
     grep -q 'xPaddingMethod:        "tokenish"' "$ROOT/install.sh"
+check "install.sh uses object xhttp headers" \
+    grep -q 'headers: {},' "$ROOT/install.sh"
 check "install.sh installs healthcheck" \
     grep -q 'x-ui-hybrid-healthcheck' "$ROOT/install.sh"
 check "install.sh installs backup" \
