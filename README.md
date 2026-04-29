@@ -113,17 +113,15 @@ curl -fsSL https://raw.githubusercontent.com/kaiserproger/x-ui-hybrid/main/boots
   | sudo bash -s -- vpn.example.org --admin-tg myhandle
 ```
 
-`bootstrap.sh` resolves the **latest GitHub release tag** (currently
-[v0.1.0](https://github.com/kaiserproger/x-ui-hybrid/releases/tag/v0.1.0)),
-pulls *that* tarball into a tempdir, and execs `install.sh` inside it with
-everything after `--`. The one-liner stays the same across releases — every
-new tagged release is picked up automatically.
+`bootstrap.sh` pulls `main` by default, so installer fixes are picked up
+immediately. It downloads the repo tarball into a tempdir and execs
+`install.sh` inside it with everything after `--`.
 
-To pin a specific version (or follow `main` for unreleased changes):
+To pin a specific version or branch:
 
 ```bash
-HUH_REF=v0.1.0 curl -fsSL …/bootstrap.sh | sudo bash -s -- …  # specific tag
-HUH_REF=main   curl -fsSL …/bootstrap.sh | sudo bash -s -- …  # bleeding edge
+curl -fsSL …/bootstrap.sh | sudo env HUH_REF=v0.1.0 bash -s -- …  # specific tag
+curl -fsSL …/bootstrap.sh | sudo env HUH_REF=main   bash -s -- …  # explicit branch
 ```
 
 ### From a clone
