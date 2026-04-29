@@ -133,7 +133,7 @@ die() {
 usage() {
     cat <<USAGE
 Usage: sudo $0 <domain> [options]
-       sudo $0 --uninstall [domain] [--purge]
+       sudo $0 --uninstall [domain] [--purge] [--purge-certs]
 
 Required:
   <domain>                 Public domain with an A/AAAA record on this server.
@@ -147,8 +147,10 @@ Options:
                            these usernames to /start the bot is auto-promoted.
   --skip-bot               Do not install the bot even if --bot-token was given.
   --uninstall              Remove x-ui-hybrid services, configs and generated data.
-  --purge                  With --uninstall, also purge nginx/fail2ban packages and
-                           remove acme.sh itself. This is intentionally destructive.
+  --purge                  With --uninstall, also purge nginx/fail2ban packages.
+                            Certificates and acme.sh are preserved by default.
+  --purge-certs            With --uninstall, also remove /etc/ssl/<domain> and
+                            acme.sh certificate/account data. Destructive.
   -h, --help               This help.
 
 Examples:
@@ -156,12 +158,14 @@ Examples:
   sudo $0 vpn.example.org --admin-tg myhandle --email me@example.org
   sudo $0 vpn.example.org --admin-tg me --admin-tg co-admin --bot-token 8000:AAA…
   sudo $0 --uninstall vpn.example.org --purge
+  sudo $0 --uninstall vpn.example.org --purge --purge-certs
 USAGE
 }
 
 uninstall_stack() {
     local domain="${1:-}"
     local purge="${2:-0}"
+    local purge_certs="${3:-0}"
     local meta=/etc/x-ui-hybrid/install.json
 
     if [[ -z "$domain" && -f "$meta" ]] && command -v jq >/dev/null 2>&1; then
@@ -191,16 +195,23 @@ uninstall_stack() {
     rm -f /usr/local/sbin/x-ui-hybrid-healthcheck /usr/local/sbin/x-ui-hybrid-backup
     rm -f /root/x-ui-hybrid-credentials.txt /var/log/x-ui-hybrid-health.log
 
-    green ">>> Removing nginx site, webroot and installed certificates"
+    green ">>> Removing nginx site and webroot"
     if [[ -n "$domain" ]]; then
         rm -f "/etc/nginx/sites-enabled/${domain}.conf" "/etc/nginx/sites-available/${domain}.conf"
-        rm -rf "/var/www/${domain}" "/etc/ssl/${domain}"
-        if [[ -x /root/.acme.sh/acme.sh ]]; then
-            /root/.acme.sh/acme.sh --remove -d "$domain" --ecc >/dev/null 2>&1 || true
-            rm -rf "/root/.acme.sh/${domain}_ecc" "/root/.acme.sh/${domain}"
+        rm -rf "/var/www/${domain}"
+
+        if [[ "$purge_certs" -eq 1 ]]; then
+            green ">>> Removing installed certificates for ${domain}"
+            rm -rf "/etc/ssl/${domain}"
+            if [[ -x /root/.acme.sh/acme.sh ]]; then
+                /root/.acme.sh/acme.sh --remove -d "$domain" --ecc >/dev/null 2>&1 || true
+                rm -rf "/root/.acme.sh/${domain}_ecc" "/root/.acme.sh/${domain}"
+            fi
+        else
+            yellow ">>> Preserving certificates: /etc/ssl/${domain} and /root/.acme.sh"
         fi
     else
-        yellow ">>> Domain was not provided and install.json is gone; skipping domain-specific nginx/webroot/cert cleanup."
+        yellow ">>> Domain was not provided and install.json is gone; skipping domain-specific nginx/webroot cleanup."
     fi
     rm -rf /var/www/_acme
 
@@ -211,9 +222,10 @@ uninstall_stack() {
     sysctl --system >/dev/null 2>&1 || true
 
     if [[ "$purge" -eq 1 ]]; then
-        green ">>> Purging nginx/fail2ban packages and acme.sh"
+        green ">>> Purging nginx/fail2ban packages"
         systemctl disable --now nginx.service fail2ban.service 2>/dev/null || true
-        if [[ -x /root/.acme.sh/acme.sh ]]; then
+        if [[ "$purge_certs" -eq 1 && -x /root/.acme.sh/acme.sh ]]; then
+            green ">>> Purging acme.sh"
             /root/.acme.sh/acme.sh --uninstall >/dev/null 2>&1 || true
             rm -rf /root/.acme.sh
         fi
@@ -234,6 +246,7 @@ ADMINS=()
 SKIP_BOT=0
 UNINSTALL=0
 PURGE=0
+PURGE_CERTS=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --email)        EMAIL="$2"; shift 2 ;;
@@ -242,6 +255,7 @@ while [[ $# -gt 0 ]]; do
         --skip-bot)     SKIP_BOT=1; shift ;;
         --uninstall)    UNINSTALL=1; shift ;;
         --purge)        PURGE=1; shift ;;
+        --purge-certs)  PURGE_CERTS=1; shift ;;
         -h|--help)      usage; exit 0 ;;
         -*)             die "Unknown flag: $1" ;;
         *)              [[ -z "$DOMAIN" ]] && DOMAIN="$1" || die "Unexpected positional arg: $1"; shift ;;
@@ -259,7 +273,7 @@ green ">>> x-ui-hybrid installer started at $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 green ">>> Full install log: $INSTALL_LOG"
 
 if [[ $UNINSTALL -eq 1 ]]; then
-    uninstall_stack "$DOMAIN" "$PURGE"
+    uninstall_stack "$DOMAIN" "$PURGE" "$PURGE_CERTS"
     exit 0
 fi
 

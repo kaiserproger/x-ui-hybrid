@@ -151,7 +151,8 @@ Flags:
 | `--bot-token`          | Telegram bot token; **enables the bot** (otherwise skipped)                    |
 | `--skip-bot`           | don't install the bot even if `--bot-token` is given                           |
 | `--uninstall`          | remove x-ui-hybrid services, configs and generated data                        |
-| `--purge`              | with `--uninstall`, also remove nginx/fail2ban packages and acme.sh            |
+| `--purge`              | with `--uninstall`, also remove nginx/fail2ban packages                        |
+| `--purge-certs`        | with `--uninstall`, also remove `/etc/ssl/<domain>` and acme.sh data           |
 | `-h`, `--help`         | help                                                                           |
 
 Whole run: ~2–4 minutes (apt + LE challenge + xray binary download).
@@ -253,11 +254,15 @@ The hook port (`XUH_HOOK_PORT`, default 8765) only listens on
 ## Uninstall
 
 ```bash
-# Removes services, x-ui, configs, generated data, nginx site, webroot and certs.
+# Removes services, x-ui, configs, generated data, nginx site and webroot.
+# Certificates are preserved so failed/repeated installs can reuse them.
 sudo bash install.sh --uninstall vpn.example.org
 
-# Full cleanup for a disposable VPS: also purges nginx/fail2ban and removes acme.sh.
+# Full cleanup for a disposable VPS: also purges nginx/fail2ban packages.
 sudo bash install.sh --uninstall vpn.example.org --purge
+
+# Destructive cleanup: also removes installed certificates and acme.sh data.
+sudo bash install.sh --uninstall vpn.example.org --purge --purge-certs
 ```
 
 ## Files this script touches

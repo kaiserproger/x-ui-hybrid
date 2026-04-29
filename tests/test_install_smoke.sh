@@ -36,6 +36,8 @@ check "install.sh has --uninstall flag" \
     grep -q -- '--uninstall)' "$ROOT/install.sh"
 check "install.sh has purge uninstall flag" \
     grep -q -- '--purge)' "$ROOT/install.sh"
+check "install.sh has purge-certs uninstall flag" \
+    grep -q -- '--purge-certs)' "$ROOT/install.sh"
 check "install.sh wires sysctl tuning" \
     grep -q '99-x-ui-hybrid.conf' "$ROOT/install.sh"
 check "install.sh creates xhttp inbound" \
