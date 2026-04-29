@@ -143,6 +143,8 @@ fi
 exit 0
 XUI
 chmod +x /usr/bin/x-ui
+cp /usr/bin/x-ui /usr/local/x-ui/x-ui
+chmod +x /usr/local/x-ui/x-ui
 
 cat > /etc/systemd/system/x-ui.service <<'UNIT'
 [Service]

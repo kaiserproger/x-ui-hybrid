@@ -635,16 +635,17 @@ ${DOMAIN}
 ${CERT_DIR}/fullchain.pem
 ${CERT_DIR}/privkey.pem
 EOF
-command -v x-ui >/dev/null 2>&1 || die "3x-ui installation failed (x-ui binary not found)."
+XUI_BIN=/usr/local/x-ui/x-ui
+[[ -x "$XUI_BIN" ]] || die "3x-ui installation failed (binary not found at $XUI_BIN)."
+command -v x-ui >/dev/null 2>&1 || die "3x-ui installation failed (x-ui menu command not found)."
 
 # ---------- 10. force panel creds + bind sub server to loopback ----------
 green ">>> Setting panel credentials and binding subscription server to localhost"
 systemctl stop x-ui
-x-ui setting -username "$PANEL_USER" -password "$PANEL_PASS" \
-             -port "$PANEL_PORT" -webBasePath "$PANEL_PATH" -listenIP 127.0.0.1 >/dev/null
+"$XUI_BIN" setting -username "$PANEL_USER" -password "$PANEL_PASS" \
+             -port "$PANEL_PORT" -webBasePath "$PANEL_PATH" -listenIP 127.0.0.1
 
-x-ui setting -webCert "$CERT_DIR/fullchain.pem" -webCertKey "$CERT_DIR/privkey.pem" >/dev/null 2>&1 || \
-x-ui cert    -webCert "$CERT_DIR/fullchain.pem" -webCertKey "$CERT_DIR/privkey.pem" >/dev/null 2>&1 || true
+"$XUI_BIN" cert -webCert "$CERT_DIR/fullchain.pem" -webCertKey "$CERT_DIR/privkey.pem"
 
 # Subscription settings live in the settings table (no CLI flags).
 # Make the path match nginx's secret prefix and bind the listener to loopback.
@@ -663,6 +664,18 @@ SQL
 then
     die "failed to update x-ui subscription settings in $XUI_DB"
 fi
+
+actual_panel_port="$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='webPort';")"
+actual_panel_path="$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='webBasePath';")"
+actual_panel_listen="$(sqlite3 "$XUI_DB" "SELECT value FROM settings WHERE key='webListen';")"
+expected_panel_path="/${PANEL_PATH}/"
+
+[[ "$actual_panel_port" == "$PANEL_PORT" ]] \
+    || die "x-ui panel port setting did not apply: expected ${PANEL_PORT}, got ${actual_panel_port:-empty}"
+[[ "$actual_panel_path" == "$expected_panel_path" ]] \
+    || die "x-ui panel path setting did not apply: expected ${expected_panel_path}, got ${actual_panel_path:-empty}"
+[[ "$actual_panel_listen" == "127.0.0.1" ]] \
+    || die "x-ui panel listen setting did not apply: expected 127.0.0.1, got ${actual_panel_listen:-empty}"
 
 systemctl restart x-ui
 
