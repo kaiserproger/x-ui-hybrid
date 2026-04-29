@@ -378,12 +378,78 @@ ACME=/root/.acme.sh/acme.sh
 CERT_DIR="/etc/ssl/${DOMAIN}"
 mkdir -p "$CERT_DIR"
 
-"$ACME" --issue --webroot "$ACME_WEBROOT" -d "$DOMAIN" --keylength ec-256 --force
+PANEL_PORT="$(shuf -i 20000-39999 -n 1)"
+PANEL_USER="admin"
+PANEL_PASS="$(openssl rand -hex 12)"
+PANEL_PATH="$(openssl rand -hex 9)"
 
-"$ACME" --install-cert -d "$DOMAIN" --ecc \
-    --fullchain-file "$CERT_DIR/fullchain.pem" \
-    --key-file       "$CERT_DIR/privkey.pem" \
-    --reloadcmd      "systemctl reload nginx 2>/dev/null; systemctl restart x-ui 2>/dev/null || true"
+ETC_DIR=/etc/x-ui-hybrid
+mkdir -p "$ETC_DIR"
+PANEL_RECOVERY_JSON="${ETC_DIR}/panel-recovery.json"
+
+write_panel_recovery() {
+    local state="$1"
+    cat > "$PANEL_RECOVERY_JSON" <<EOF
+{
+  "domain": "${DOMAIN}",
+  "state": "${state}",
+  "panel": {
+    "url": "https://${DOMAIN}/${PANEL_PATH}/",
+    "internal": "https://127.0.0.1:${PANEL_PORT}/${PANEL_PATH}/",
+    "host": "127.0.0.1",
+    "port": ${PANEL_PORT},
+    "path": "/${PANEL_PATH}/",
+    "user": "${PANEL_USER}",
+    "pass": "${PANEL_PASS}"
+  }
+}
+EOF
+    chmod 600 "$PANEL_RECOVERY_JSON"
+
+    SUMMARY=/root/x-ui-hybrid-credentials.txt
+    cat > "$SUMMARY" <<EOF
+=== x-ui-hybrid panel recovery ===
+Generated: $(date -u +'%Y-%m-%dT%H:%M:%SZ')
+State    : ${state}
+
+These are the generated panel settings. If State is applied_to_x-ui, they have
+already been written to 3x-ui. Otherwise the installer stopped before that step.
+
+URL      : https://${DOMAIN}/${PANEL_PATH}/
+Internal : https://127.0.0.1:${PANEL_PORT}/${PANEL_PATH}/
+Username : ${PANEL_USER}
+Password : ${PANEL_PASS}
+
+Recovery JSON: ${PANEL_RECOVERY_JSON}
+EOF
+    chmod 600 "$SUMMARY"
+    green ">>> Panel recovery written: ${PANEL_RECOVERY_JSON} (${state})"
+}
+
+write_panel_recovery "generated_not_yet_applied"
+
+if [[ -s "$CERT_DIR/fullchain.pem" && -s "$CERT_DIR/privkey.pem" ]]; then
+    green ">>> Reusing existing certificate in ${CERT_DIR}"
+else
+    set +e
+    "$ACME" --issue --webroot "$ACME_WEBROOT" -d "$DOMAIN" --keylength ec-256
+    acme_issue_status=$?
+    set -e
+
+    if [[ $acme_issue_status -ne 0 && $acme_issue_status -ne 2 ]]; then
+        yellow ">>> acme.sh issue returned ${acme_issue_status}; trying to install any existing acme.sh cert"
+    fi
+
+    if ! "$ACME" --install-cert -d "$DOMAIN" --ecc \
+        --fullchain-file "$CERT_DIR/fullchain.pem" \
+        --key-file       "$CERT_DIR/privkey.pem" \
+        --reloadcmd      "systemctl reload nginx 2>/dev/null; systemctl restart x-ui 2>/dev/null || true"; then
+        die "Let's Encrypt certificate issue/install failed and no reusable certificate exists. If rate-limited, retry after the time shown by acme.sh or use another domain."
+    fi
+
+    [[ -s "$CERT_DIR/fullchain.pem" && -s "$CERT_DIR/privkey.pem" ]] \
+        || die "acme.sh reported success but installed certificate files are missing in ${CERT_DIR}"
+fi
 
 chmod 644 "$CERT_DIR/fullchain.pem"
 chmod 640 "$CERT_DIR/privkey.pem"
@@ -397,10 +463,6 @@ green ">>> Switching nginx to TLS (TCP/443) with panel, XHTTP and subscription e
 # Secrets used by xray and the bot. All hex / urlsafe.
 XHTTP_PATH="$(openssl rand -hex 9)"            # path under /
 SUB_PATH="$(openssl rand -hex 9)"              # path under /
-PANEL_PORT="$(shuf -i 20000-39999 -n 1)"
-PANEL_USER="admin"
-PANEL_PASS="$(openssl rand -hex 12)"
-PANEL_PATH="$(openssl rand -hex 9)"
 XHTTP_PADDING_KEY="$(openssl rand -hex 32)"
 SUB_PORT_INTERNAL=2096                         # 3x-ui default sub server port (loopback only)
 
@@ -459,9 +521,6 @@ server {
     ssl_prefer_server_ciphers off;
     ssl_session_cache   shared:SSL:10m;
     ssl_session_timeout 1d;
-    ssl_stapling        on;
-    ssl_stapling_verify on;
-
     add_header Strict-Transport-Security "max-age=31536000" always;
     add_header X-Content-Type-Options nosniff always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
@@ -600,41 +659,7 @@ systemctl restart x-ui
 # Persist panel access immediately. The following inbound/API steps can fail on
 # upstream 3x-ui changes; without this early recovery file the generated panel
 # password only exists in this shell process.
-ETC_DIR=/etc/x-ui-hybrid
-mkdir -p "$ETC_DIR"
-PANEL_RECOVERY_JSON="${ETC_DIR}/panel-recovery.json"
-cat > "$PANEL_RECOVERY_JSON" <<EOF
-{
-  "domain": "${DOMAIN}",
-  "panel": {
-    "url": "https://${DOMAIN}/${PANEL_PATH}/",
-    "internal": "https://127.0.0.1:${PANEL_PORT}/${PANEL_PATH}/",
-    "host": "127.0.0.1",
-    "port": ${PANEL_PORT},
-    "path": "/${PANEL_PATH}/",
-    "user": "${PANEL_USER}",
-    "pass": "${PANEL_PASS}"
-  }
-}
-EOF
-chmod 600 "$PANEL_RECOVERY_JSON"
-
-SUMMARY=/root/x-ui-hybrid-credentials.txt
-cat > "$SUMMARY" <<EOF
-=== x-ui-hybrid panel recovery ===
-Generated: $(date -u +'%Y-%m-%dT%H:%M:%SZ')
-
-Installation is still in progress. If the installer stops before the final
-summary, these are the panel settings already applied to 3x-ui.
-
-URL      : https://${DOMAIN}/${PANEL_PATH}/
-Internal : https://127.0.0.1:${PANEL_PORT}/${PANEL_PATH}/
-Username : ${PANEL_USER}
-Password : ${PANEL_PASS}
-
-Recovery JSON: ${PANEL_RECOVERY_JSON}
-EOF
-chmod 600 "$SUMMARY"
+write_panel_recovery "applied_to_x-ui"
 
 # ---------- 11. wait for panel + subscription server ----------
 green ">>> Waiting for x-ui (panel + subscription server)"

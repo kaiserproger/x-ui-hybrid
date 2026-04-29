@@ -3,7 +3,7 @@
 #
 # Use:
 #   curl -fsSL https://raw.githubusercontent.com/kaiserproger/x-ui-hybrid/main/bootstrap.sh \
-#       | sudo bash -s -- vpn.example.org --admin-tg myhandle [--bot-token 8000:AAA…] [--email me@x]
+#       | sudo env HUH_REF=main bash -s -- vpn.example.org --admin-tg myhandle [--bot-token 8000:AAA…] [--email me@x]
 #
 # By default this follows main, so the one-liner picks up unreleased installer
 # fixes immediately. Pin HUH_REF to a tag if you need a stable release.

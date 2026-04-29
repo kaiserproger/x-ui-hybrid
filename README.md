@@ -110,7 +110,7 @@ streaming endpoint behind it.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kaiserproger/x-ui-hybrid/main/bootstrap.sh \
-  | sudo bash -s -- vpn.example.org --admin-tg myhandle
+  | sudo env HUH_REF=main bash -s -- vpn.example.org --admin-tg myhandle
 ```
 
 `bootstrap.sh` pulls `main` by default, so installer fixes are picked up
