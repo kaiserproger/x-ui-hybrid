@@ -79,13 +79,22 @@ run_failure_diagnostics() {
             done < "/etc/nginx/sites-available/${DOMAIN}.conf"
         fi
 
-        yellow ">>> HTTP probe: decoy root via nginx"
-        curl -ksS --max-time 8 --resolve "${DOMAIN}:443:127.0.0.1" \
-            -o /dev/null -w "https://${DOMAIN}/ -> HTTP %{http_code}, remote=%{remote_ip}:%{remote_port}, err=%{errormsg}\n" \
-            "https://${DOMAIN}/"
+        yellow ">>> HTTP probe: decoy root via nginx bootstrap (port 80)"
+        curl -sS --max-time 8 --resolve "${DOMAIN}:80:127.0.0.1" \
+            -o /dev/null -w "http://${DOMAIN}/ -> HTTP %{http_code}, remote=%{remote_ip}:%{remote_port}, err=%{errormsg}\n" \
+            "http://${DOMAIN}/"
+
+        if ss -ltn 'sport = :443' | grep -q ':443'; then
+            yellow ">>> HTTPS probe: decoy root via nginx TLS (port 443)"
+            curl -ksS --max-time 8 --resolve "${DOMAIN}:443:127.0.0.1" \
+                -o /dev/null -w "https://${DOMAIN}/ -> HTTP %{http_code}, remote=%{remote_ip}:%{remote_port}, err=%{errormsg}\n" \
+                "https://${DOMAIN}/"
+        else
+            yellow ">>> HTTPS probe skipped: nothing is listening on TCP/443 yet (installer likely stopped before TLS config)"
+        fi
     fi
 
-    if [[ -n "${DOMAIN:-}" && -n "${PANEL_PATH:-}" ]]; then
+    if [[ -n "${DOMAIN:-}" && -n "${PANEL_PATH:-}" ]] && ss -ltn 'sport = :443' | grep -q ':443'; then
         yellow ">>> HTTP probe: panel path via nginx"
         curl -ksS --max-time 8 --resolve "${DOMAIN}:443:127.0.0.1" \
             -o /dev/null -w "https://${DOMAIN}/${PANEL_PATH}/ -> HTTP %{http_code}, remote=%{remote_ip}:%{remote_port}, err=%{errormsg}\n" \
@@ -431,10 +440,11 @@ write_panel_recovery "generated_not_yet_applied"
 if [[ -s "$CERT_DIR/fullchain.pem" && -s "$CERT_DIR/privkey.pem" ]]; then
     green ">>> Reusing existing certificate in ${CERT_DIR}"
 else
-    set +e
-    "$ACME" --issue --webroot "$ACME_WEBROOT" -d "$DOMAIN" --keylength ec-256
-    acme_issue_status=$?
-    set -e
+    if "$ACME" --issue --webroot "$ACME_WEBROOT" -d "$DOMAIN" --keylength ec-256; then
+        acme_issue_status=0
+    else
+        acme_issue_status=$?
+    fi
 
     if [[ $acme_issue_status -ne 0 && $acme_issue_status -ne 2 ]]; then
         yellow ">>> acme.sh issue returned ${acme_issue_status}; trying to install any existing acme.sh cert"
