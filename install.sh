@@ -410,6 +410,8 @@ server {
     }
 
     # ---- 3x-ui admin panel: secret prefix proxied to the loopback-only panel ----
+    location = /${PANEL_PATH} { return 308 /${PANEL_PATH}/; }
+
     location /${PANEL_PATH}/ {
         proxy_pass https://127.0.0.1:${PANEL_PORT};
         proxy_http_version 1.1;

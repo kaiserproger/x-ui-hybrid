@@ -49,6 +49,8 @@ check "install.sh installs healthcheck" \
     grep -q 'x-ui-hybrid-healthcheck' "$ROOT/install.sh"
 check "install.sh installs backup" \
     grep -q 'x-ui-hybrid-backup' "$ROOT/install.sh"
+check "install.sh redirects bare panel path" \
+    grep -Fq 'location = /${PANEL_PATH}' "$ROOT/install.sh"
 check "install.sh writes meta JSON" \
     grep -qE 'INSTALL_META=.*install\.json' "$ROOT/install.sh"
 check "install.sh prints QR codes" \
